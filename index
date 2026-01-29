@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Audiology Scratchpad (Local)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; line-height: 1.35; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    h2 { font-size: 14px; margin: 0 0 8px; }
+    label { font-size: 12px; font-weight: 600; display: block; margin: 10px 0 6px; }
+    textarea, input, select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 8px; font: inherit; }
+    textarea { min-height: 82px; resize: vertical; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button { padding: 8px 10px; border-radius: 10px; border: 1px solid #bbb; background: #f7f7f7; cursor: pointer; }
+    button:hover { background: #efefef; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .small { font-size: 12px; color: #555; }
+    .pill { display: inline-block; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; font-size: 12px; margin-right: 6px; }
+    .warn { color: #8a4b00; }
+    @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Local Audiology Scratchpad</h1>
+  <div class="small">
+    <span class="pill">Offline</span>
+    <span class="pill">Autosaves</span>
+    <span class="pill warn">Avoid identifiers if you’ll paste into an external LLM</span>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <div class="card">
+      <h2>History (structured headers)</h2>
+
+      <label>Hearing History:</label>
+      <textarea id="hh"></textarea>
+
+      <label>Speech and Language Development (For Paediatrics):</label>
+      <textarea id="sld"></textarea>
+
+      <label>ENT History:</label>
+      <textarea id="ent"></textarea>
+
+      <label>General Health:</label>
+      <textarea id="gh"></textarea>
+
+      <label>Pregnancy and Birth (For Paediatrics):</label>
+      <textarea id="pb"></textarea>
+
+      <label>Family History:</label>
+      <textarea id="fh"></textarea>
+
+      <label>Noise Exposure (For Adults):</label>
+      <textarea id="ne"></textarea>
+
+      <label>Tinnitus / Vertigo:</label>
+      <textarea id="tv"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>Outcomes + stock sentences</h2>
+
+      <label>Free-style appointment notes (messy is fine):</label>
+      <textarea id="freeform" placeholder="e.g., child reluctant for headphones, VRA in FF, tymps type C..."></textarea>
+
+      <label>Autotext lookup (code or keywords)</label>
+      <input id="codeSearch" class="mono" placeholder="Try: hist om, vnorm, za, cnorm, anfa" />
+      <div class="btns">
+        <button id="insertSelected">Insert selected</button>
+        <button id="insertTop">Insert top match</button>
+        <button id="clearMatches">Clear matches</button>
+      </div>
+      <label>Matches</label>
+      <select id="matches" size="8" class="mono"></select>
+
+      <label>Stock sentences (build your copy/paste block here):</label>
+      <textarea id="stock" placeholder="This is where inserted autotext sentences will accumulate..."></textarea>
+
+      <div class="btns">
+        <button id="copyReport">Copy report draft</button>
+        <button id="copyLLM">Copy LLM bundle</button>
+        <button id="clearAll">Clear everything</button>
+      </div>
+
+      <label>Preview (report draft)</label>
+      <textarea id="preview" readonly></textarea>
+    </div>
+  </div>
+
+<script>
+/**
+ * Minimal starter AUTOTEXT dictionary seeded from your “Audiology Autotext” list.
+ * Extend this by adding more items from your doc (code -> sentence).
+ * Source: your FINAL autotext listing for dictation 2023.docx :contentReference[oaicite:2]{index=2}
+ */
+const AUTOTEXT = {
+  // History
+  "hist hl": "Assessment of hearing levels.",
+  "hist om": "Recurrent ear infections.",
+  "hist pc": "Parental concern regarding hearing",
+  "hist sp": "Delayed speech and language development.",
+  "hist rev": "Review of hearing levels.",
+  "hist fh": "Assessment of child with family history of permanent hearing loss.",
+  "hist chemochild": "Assessment of child being treated with ototoxic medication (chemotherapy).",
+  "hist chemoadult": "Assessment of adult being treated with ototoxic medication (chemotherapy).",
+
+  // VRA / PTA
+  "vnorm": "Normal hearing across the speech frequency range when listening with both ears.",
+  "hnorm": "Normal hearing across the speech frequency range.",
+
+  // Tymps
+  "za": "Normal middle ear pressure and compliance.",
+  "zb": "Impaired middle ear mobility.",
+  "zc": "Negative middle ear pressure and normal middle ear compliance.",
+  "zpeak": "Peaked, consistent with aerated middle ear system.",
+  "zflat": "Non-peaked, consistent with impaired middle ear mobility.",
+
+  // OAE
+  "normoae": "The presence of otoacoustic emissions in both ears at mid to high frequencies suggests good cochlear outer hair cell function at these frequencies.",
+  "interptrans": "A hearing loss in excess of a mild degree can be eliminated at these frequencies.",
+  "interpdp": "A hearing loss in excess of a mild to moderate degree can be eliminated at these frequencies.",
+
+  // Conclusion
+  "cnorm": "Hearing sufficient for communication needs.",
+  "csl": "Hearing sufficient for normal speech and language development.",
+  "cnad": "No abnormality detected.",
+  "cfluct": "but may fluctuate according to the state of the middle ears.",
+  "cplohl": "In view of the presence of risk factors for progressive or late onset hearing loss, monitoring of hearing levels is recommended.",
+
+  // Action
+  "anfa": "Review on request.",
+  "anfa2": "Review on request if further concerns arise.",
+  "amed": "Review following medical management of middle ear pathology.",
+  "amed2": "Review in 2 months following medical management of middle ear pathology.",
+  "refent1": "Ear Nose and Throat Specialist opinion is warranted.",
+  "acontact": "Please don’t hesitate to contact me if you have any queries regarding these results.",
+};
+
+const KEY = "audiology_scratchpad_v1";
+
+const els = {
+  hh: document.getElementById("hh"),
+  sld: document.getElementById("sld"),
+  ent: document.getElementById("ent"),
+  gh: document.getElementById("gh"),
+  pb: document.getElementById("pb"),
+  fh: document.getElementById("fh"),
+  ne: document.getElementById("ne"),
+  tv: document.getElementById("tv"),
+  freeform: document.getElementById("freeform"),
+  codeSearch: document.getElementById("codeSearch"),
+  matches: document.getElementById("matches"),
+  stock: document.getElementById("stock"),
+  preview: document.getElementById("preview"),
+};
+
+function nowISO() {
+  const d = new Date();
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
+
+function save() {
+  const data = {};
+  for (const k of Object.keys(els)) {
+    data[k] = els[k].value ?? "";
+  }
+  data._savedAt = nowISO();
+  localStorage.setItem(KEY, JSON.stringify(data));
+  renderPreview();
+}
+
+function load() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) { renderPreview(); return; }
+  try {
+    const data = JSON.parse(raw);
+    for (const k of Object.keys(els)) {
+      if (typeof data[k] === "string") els[k].value = data[k];
+    }
+  } catch {}
+  renderPreview();
+}
+
+function sectionBlock() {
+  const lines = [];
+  const add = (title, val) => {
+    const v = (val || "").trim();
+    if (v) lines.push(`${title}\n${v}\n`);
+  };
+
+  add("Hearing History:", els.hh.value);
+  add("Speech and Language Development (For Paediatrics):", els.sld.value);
+  add("ENT History:", els.ent.value);
+  add("General Health:", els.gh.value);
+  add("Pregnancy and Birth (For Paediatrics):", els.pb.value);
+  add("Family History:", els.fh.value);
+  add("Noise Exposure (For Adults):", els.ne.value);
+  add("Tinnitus / Vertigo:", els.tv.value);
+
+  return lines.join("\n");
+}
+
+function renderPreview() {
+  const out = [];
+  out.push("HISTORY");
+  out.push("------");
+  out.push(sectionBlock().trim() || "(none)");
+  out.push("\nAPPOINTMENT NOTES");
+  out.push("-----------------");
+  out.push((els.freeform.value || "").trim() || "(none)");
+  out.push("\nSTOCK SENTENCES");
+  out.push("--------------");
+  out.push((els.stock.value || "").trim() || "(none)");
+  els.preview.value = out.join("\n");
+}
+
+function searchAutotext(q) {
+  const query = (q || "").trim().toLowerCase();
+  if (!query) return [];
+  const scored = Object.entries(AUTOTEXT).map(([code, text]) => {
+    const hay = (code + " " + text).toLowerCase();
+    let score = 0;
+    if (code.toLowerCase() === query) score += 100;
+    if (code.toLowerCase().startsWith(query)) score += 50;
+    if (hay.includes(query)) score += 10;
+    // tiny boost if all tokens appear
+    const toks = query.split(/\s+/).filter(Boolean);
+    if (toks.length > 1 && toks.every(t => hay.includes(t))) score += 10;
+    return { code, text, score };
+  });
+  return scored.filter(x => x.score > 0).sort((a,b) => b.score - a.score).slice(0, 30);
+}
+
+function refreshMatches() {
+  els.matches.innerHTML = "";
+  const results = searchAutotext(els.codeSearch.value);
+  for (const r of results) {
+    const opt = document.createElement("option");
+    opt.value = r.code;
+    opt.textContent = `${r.code} — ${r.text}`;
+    els.matches.appendChild(opt);
+  }
+}
+
+function insertByCode(code) {
+  if (!code || !AUTOTEXT[code]) return;
+  const s = AUTOTEXT[code].trim();
+  const cur = (els.stock.value || "").trim();
+  const next = cur ? (cur + "\n" + s) : s;
+  els.stock.value = next + "\n";
+  save();
+}
+
+async function copyToClipboard(text) {
+  await navigator.clipboard.writeText(text);
+}
+
+document.getElementById("insertSelected").addEventListener("click", () => {
+  const opt = els.matches.selectedOptions?.[0];
+  if (!opt) return;
+  insertByCode(opt.value);
+});
+
+document.getElementById("insertTop").addEventListener("click", () => {
+  const opt = els.matches.options?.[0];
+  if (!opt) return;
+  insertByCode(opt.value);
+});
+
+document.getElementById("clearMatches").addEventListener("click", () => {
+  els.matches.innerHTML = "";
+});
+
+document.getElementById("copyReport").addEventListener("click", async () => {
+  renderPreview();
+  await copyToClipboard(els.preview.value);
+  alert("Copied report draft to clipboard.");
+});
+
+document.getElementById("copyLLM").addEventListener("click", async () => {
+  const bundle = [
+    "You are an assistant helping an audiologist convert messy clinical notes into a structured report.",
+    "Rules:",
+    "- Do NOT invent details. If missing, leave blank or write 'Not reported'.",
+    "- Keep language professional and concise.",
+    "- Use headings exactly as provided.",
+    "- Convert any shorthand into full sentences where appropriate.",
+    "- Keep any pasted 'Stock sentences' verbatim (do not paraphrase) unless asked.",
+    "- Remove or mask identifiers (names, DOB, UR numbers) if present.",
+    "",
+    "OUTPUT FORMAT:",
+    "1) HISTORY (with headings below)",
+    "2) APPOINTMENT NOTES (summarised)",
+    "3) RESULTS (bullet points if test data present)",
+    "4) CONCLUSION",
+    "5) PLAN / ACTIONS",
+    "",
+    "HISTORY HEADINGS:",
+    "- Hearing History:",
+    "- Speech and Language Development (For Paediatrics):",
+    "- ENT History:",
+    "- General Health:",
+    "- Pregnancy and Birth (For Paediatrics):",
+    "- Family History:",
+    "- Noise Exposure (For Adults):",
+    "- Tinnitus / Vertigo:",
+    "",
+    "RAW INPUT:",
+    "HISTORY:",
+    sectionBlock().trim() || "(none)",
+    "",
+    "FREEFORM APPOINTMENT NOTES:",
+    (els.freeform.value || "").trim() || "(none)",
+    "",
+    "STOCK SENTENCES (paste these into relevant sections):",
+    (els.stock.value || "").trim() || "(none)"
+  ].join("\n");
+
+  await copyToClipboard(bundle);
+  alert("Copied LLM bundle to clipboard.");
+});
+
+document.getElementById("clearAll").addEventListener("click", () => {
+  if (!confirm("Clear all fields and wipe autosave?")) return;
+  localStorage.removeItem(KEY);
+  for (const k of Object.keys(els)) els[k].value = "";
+  els.matches.innerHTML = "";
+  renderPreview();
+});
+
+// Autosave on input
+for (const k of Object.keys(els)) {
+  const el = els[k];
+  if (!el || !(el instanceof HTMLElement)) continue;
+  el.addEventListener("input", () => {
+    if (k === "codeSearch") refreshMatches();
+    save();
+  });
+}
+
+load();
+</script>
+</body>
+</html>
